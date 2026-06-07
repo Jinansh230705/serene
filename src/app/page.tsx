@@ -88,7 +88,7 @@ export default function Home() {
   // Fetch paginated and filtered items on demand, using seed to randomize
   useEffect(() => {
     if (!seed) return; // Wait until client-side seed is initialized to fetch
-    
+
     let active = true;
     const fetchData = async () => {
       setLoading(true);
@@ -262,11 +262,11 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col px-6 md:px-12 lg:px-20 py-12 md:py-20 max-w-[1920px] mx-auto w-full">
-      
+
       {/* Header */}
       <header className="flex flex-col items-center text-center mb-16 md:mb-24">
         <h1 className="text-3xl md:text-5xl font-light tracking-[0.25em] text-[#2E2B29] uppercase mb-4">
-          Serene
+          Sereine
         </h1>
         <p className="text-xs md:text-sm text-[#8E8477] tracking-[0.15em] uppercase font-medium">
           A Curated Gallery of Artworks
@@ -275,7 +275,7 @@ export default function Home() {
 
       {/* Filter and Search Section */}
       <div className="flex flex-col gap-6 md:gap-8 items-center justify-between mb-16 border-b border-[#EAE4D9] pb-8">
-        
+
         {/* Categories Tabs */}
         <div className="flex gap-2 overflow-x-auto pb-3 md:pb-0 max-w-full no-scrollbar justify-start md:justify-center w-full">
           <div className="flex flex-nowrap gap-1 md:gap-3 px-2">
@@ -283,11 +283,10 @@ export default function Home() {
               <button
                 key={cat}
                 onClick={() => setCategory(cat)}
-                className={`whitespace-nowrap text-[10px] md:text-xs tracking-wider uppercase font-semibold px-4 py-2 rounded-full border transition-all duration-300 ${
-                  category === cat
-                    ? 'bg-[#2E2B29] text-[#FBF9F6] border-[#2E2B29]'
-                    : 'bg-transparent text-[#8E8477] border-transparent hover:border-[#EAE4D9] hover:text-[#2E2B29]'
-                }`}
+                className={`whitespace-nowrap text-[10px] md:text-xs tracking-wider uppercase font-semibold px-4 py-2 rounded-full border transition-all duration-300 ${category === cat
+                  ? 'bg-[#2E2B29] text-[#FBF9F6] border-[#2E2B29]'
+                  : 'bg-transparent text-[#8E8477] border-transparent hover:border-[#EAE4D9] hover:text-[#2E2B29]'
+                  }`}
               >
                 {cat}
               </button>
@@ -316,11 +315,11 @@ export default function Home() {
       <div className="flex items-center justify-between text-[10px] md:text-xs tracking-widest text-[#8E8477] uppercase font-bold mb-8">
         <span>
           {activeItemsCount === 0 && !loading
-            ? 'No artworks match selection' 
+            ? 'No artworks match selection'
             : `Showing ${activeItemsCount} of ${totalItems} artworks`}
         </span>
         {search && (
-          <button 
+          <button
             onClick={() => setSearch('')}
             className="hover:underline hover:text-[#2E2B29] transition-colors cursor-pointer"
           >
@@ -354,7 +353,9 @@ export default function Home() {
         !loading && (
           <div className="flex-grow flex flex-col items-center justify-center py-32 text-center">
             <svg className="w-8 h-8 text-[#8E8477]/40 mb-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 00.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375 0 11-.75 0 .375 0 01.75 0z" />
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 15l-5-5L5 21" />
             </svg>
             <span className="text-sm font-light text-[#8E8477]">No entries match your search criteria.</span>
           </div>
@@ -392,9 +393,9 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="mt-20 border-t border-[#EAE4D9]/60 pt-8 flex items-center justify-center text-[10px] text-[#8E8477] tracking-wider uppercase font-semibold">
-        <span>© {new Date().getFullYear()} Serene Gallery</span>
+        <span>© {new Date().getFullYear()} Sereine Gallery</span>
       </footer>
-      
+
     </div>
   );
 }

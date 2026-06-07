@@ -9,7 +9,7 @@ const plusJakartaSans = Plus_Jakarta_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Serene - Art Gallery",
+  title: "Sereine - Art Gallery",
   description: "A minimalist gallery of curated artworks, sketches, landscapes, and concept arts.",
 };
 
