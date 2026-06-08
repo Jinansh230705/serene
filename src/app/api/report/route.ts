@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       method: 'POST',
       headers: {
         'Accept': 'application/vnd.github.v3+json',
-        'Authorization': `token ${githubToken}`,
+        'Authorization': `Bearer ${githubToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
