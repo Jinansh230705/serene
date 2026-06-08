@@ -26,6 +26,5 @@ jobs:
             **Tweet ID:** `${{ github.event.client_payload.tweetId }}`
             **Image URL:** ${{ github.event.client_payload.imageUrl }}
             
-            _Review this report and if valid, add the ID or Image URL to `blacklist.json` and close this issue._
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

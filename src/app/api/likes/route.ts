@@ -1,6 +1,5 @@
 import { NextResponse, NextRequest } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { getDb } from '@/lib/mongodb';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,47 +70,36 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || '';
     const seed = searchParams.get('seed') || '';
 
-    // Due to Turbopack workspace inference issues, process.cwd() might point to the user root.
-    // We provide a fallback path just in case.
-    const possiblePaths = [
-      path.join(process.cwd(), 'src', 'data', 'likes.json'),
-      path.join(process.cwd(), 'Downloads', 'tweeter-likes', 'src', 'data', 'likes.json')
-    ];
-
     let tweets: Tweet[] = [];
     try {
-      for (const filePath of possiblePaths) {
-        if (fs.existsSync(filePath)) {
-          const fileContent = fs.readFileSync(filePath, 'utf-8');
-          tweets = JSON.parse(fileContent);
-          break;
-        }
+      const db = await getDb();
+      const likesCol = db.collection('likes');
+      
+      const query: any = {};
+      if (category !== 'All') {
+        // Use case-insensitive regex for category match if needed, though exact is fine usually
+        query.category = { $regex: new RegExp(`^${category}$`, 'i') };
       }
+
+      if (search) {
+        const searchRegex = { $regex: search, $options: 'i' };
+        query.$or = [
+          { authorName: searchRegex },
+          { authorHandle: searchRegex },
+          { text: searchRegex },
+          { hashtags: searchRegex }
+        ];
+      }
+
+      tweets = (await likesCol.find(query).toArray()) as unknown as Tweet[];
     } catch (e) {
-      console.error('Error reading likes.json dynamically:', e);
+      console.error('Error reading from MongoDB:', e);
     }
-    let filtered = tweets;
-
-    // Apply category filter
-    if (category !== 'All') {
-      const catLower = category.toLowerCase();
-      filtered = filtered.filter(t => t.category.toLowerCase() === catLower);
-    }
-
-    // Apply search filter
-    if (search) {
-      const query = search.toLowerCase().trim();
-      filtered = filtered.filter(t => 
-        t.authorName.toLowerCase().includes(query) ||
-        t.authorHandle.toLowerCase().includes(query) ||
-        t.text.toLowerCase().includes(query) ||
-        (t.hashtags && t.hashtags.some(tag => tag.toLowerCase().includes(query)))
-      );
-    }
-
+    
     // Flatten multi-image tweets into separate GridItem objects
     let items: GridItem[] = [];
-    filtered.forEach((t) => {
+    tweets.forEach((t) => {
+      if (!t.media) return;
       t.media.forEach((m, mediaIndex) => {
         if (!m.url) return;
         items.push({

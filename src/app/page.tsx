@@ -2,6 +2,7 @@ import React from 'react';
 import fs from 'fs';
 import path from 'path';
 import ClientGallery from '@/components/ClientGallery';
+import { getDb } from '@/lib/mongodb';
 
 export const dynamic = 'force-dynamic';
 
@@ -77,27 +78,22 @@ export default async function Page({ searchParams }: PageProps) {
   
   let tweets: Tweet[] = [];
   try {
-    // Due to Turbopack workspace inference issues, process.cwd() might point to the user root.
-    // We provide a fallback path just in case.
-    const possiblePaths = [
-      path.join(process.cwd(), 'src', 'data', 'likes.json'),
-      path.join(process.cwd(), 'Downloads', 'tweeter-likes', 'src', 'data', 'likes.json')
-    ];
-
-    for (const filePath of possiblePaths) {
-      if (fs.existsSync(filePath)) {
-        const fileContent = fs.readFileSync(filePath, 'utf-8');
-        tweets = JSON.parse(fileContent);
-        break;
-      }
-    }
+    const db = await getDb();
+    const likesCol = db.collection('likes');
+    const rawTweets = await likesCol.find({}).toArray();
+    tweets = rawTweets.map(doc => {
+      // Remove _id to prevent serialization errors when passing to client component
+      const { _id, ...rest } = doc;
+      return rest as unknown as Tweet;
+    });
   } catch (e) {
-    console.error('Error reading likes.json statically:', e);
+    console.error('Error reading from MongoDB statically:', e);
   }
 
   // Flatten multi-image tweets into separate GridItem objects
   let items: GridItem[] = [];
   tweets.forEach((t) => {
+    if (!t.media) return;
     t.media.forEach((m, mediaIndex) => {
       if (!m.url) return;
       items.push({

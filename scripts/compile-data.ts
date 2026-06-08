@@ -1,11 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import sizeOf from 'image-size';
+import { MongoClient } from 'mongodb';
+import 'dotenv/config';
 
-// Input and output paths
+// Input paths
 const RAW_DIR = path.join(process.cwd(), 'likes-raw');
-const OUTPUT_DIR = path.join(process.cwd(), 'src', 'data');
-const OUTPUT_FILE = path.join(OUTPUT_DIR, 'likes.json');
 
 interface RawMedia {
   imageUrl: string;
@@ -52,29 +52,6 @@ interface CompiledTweet {
   collectedAt: string;
 }
 
-// Ensure output directory exists
-if (!fs.existsSync(OUTPUT_DIR)) {
-  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-}
-
-// Load existing dimensions cache
-const dimensionsCache = new Map<string, { width: number; height: number }>();
-if (fs.existsSync(OUTPUT_FILE)) {
-  try {
-    const existingData: CompiledTweet[] = JSON.parse(fs.readFileSync(OUTPUT_FILE, 'utf-8'));
-    for (const item of existingData) {
-      for (const m of item.media) {
-        if (m.url && m.width && m.height) {
-          dimensionsCache.set(m.url, { width: m.width, height: m.height });
-        }
-      }
-    }
-    console.log(`Loaded ${dimensionsCache.size} image dimensions from cache.`);
-  } catch (err) {
-    console.warn('Could not load existing cache:', err);
-  }
-}
-
 interface Attribution {
   title: string | null;
   artist: string | null;
@@ -108,25 +85,21 @@ function parseAttribution(text: string): Attribution {
   let title: string | null = null;
   let artist: string | null = null;
 
-  // 1. [Artist]'s [Title]
   let m = clean.match(/^([A-Z\p{Lu}].*?)'s\s+(.+)$/u);
   if (m && isValidName(m[1].trim())) {
     return { title: m[2].trim(), artist: m[1].trim(), year };
   }
 
-  // 2. [Title] by|of [Artist]
   m = clean.match(/^(.*)\s+(?:by|of)\s+([A-Z\p{Lu}].*)$/u);
   if (m && isValidName(m[2].trim())) {
     title = m[1].trim();
     artist = m[2].trim();
-    // Neutralize generic descriptor titles like "Paintings" or "The Seascapes"
     if (/^(works|paintings|art|seascapes|landscapes|masterpieces?|the\s+.*?(?:paintings|works|art|seascapes|landscapes))$/i.test(title)) {
       title = null;
     }
     return { title, artist, year };
   }
 
-  // 3. [Title] - [Artist]
   m = clean.match(/^(.*?)\s*[-–—]\s*([A-Z\p{Lu}].*)$/u);
   if (m && isValidName(m[2].trim())) {
     title = m[1].trim();
@@ -134,14 +107,12 @@ function parseAttribution(text: string): Attribution {
     return { title, artist, year };
   }
 
-  // 4. [Artist] - [Title]
   if (m && isValidName(m[1].trim())) {
     artist = m[1].trim();
     title = m[2].trim();
     return { title, artist, year };
   }
 
-  // 5. [Title]. [Artist]
   m = clean.match(/^(.*?)\s*\.\s*([A-Z\p{Lu}].*)$/u);
   if (m && isValidName(m[2].trim())) {
     title = m[1].trim();
@@ -149,7 +120,6 @@ function parseAttribution(text: string): Attribution {
     return { title, artist, year };
   }
 
-  // 6. [Title], [Artist]
   m = clean.match(/^(.*?)\s*,\s*([A-Z\p{Lu}].*)$/u);
   if (m && isValidName(m[2].trim())) {
     title = m[1].trim();
@@ -157,7 +127,6 @@ function parseAttribution(text: string): Attribution {
     return { title, artist, year };
   }
 
-  // 7. Just Artist
   if (isValidName(clean)) {
     artist = clean;
     return { title, artist, year };
@@ -181,110 +150,32 @@ function formatAttributionDisplay(attr: Attribution, fallbackName: string): stri
 function classifyTweet(text: string, hashtags: string[]): string {
   const content = (text + ' ' + hashtags.join(' ')).toLowerCase();
   
-  // Sketches & Drawings
-  if (
-    content.includes('sketch') ||
-    content.includes('pencil') ||
-    content.includes('ink') ||
-    content.includes('draw') ||
-    content.includes('drawing') ||
-    content.includes('charcoal') ||
-    content.includes('doodle') ||
-    content.includes('lineart') ||
-    content.includes('line art')
-  ) {
+  if (content.includes('sketch') || content.includes('pencil') || content.includes('ink') || content.includes('draw') || content.includes('drawing') || content.includes('charcoal') || content.includes('doodle') || content.includes('lineart') || content.includes('line art')) {
     return 'Sketches & Drawings';
   }
 
-  // Oil Painting / Traditional Art style
-  if (
-    content.includes('oil') ||
-    content.includes('painting') ||
-    content.includes('canvas') ||
-    content.includes('acrylic') ||
-    content.includes('gouache') ||
-    content.includes('watercolor') ||
-    content.includes('watercolour') ||
-    content.includes('tempera') ||
-    content.includes('impressionism') ||
-    content.includes('claudemonet') ||
-    content.includes('monet') ||
-    content.includes('van gogh') ||
-    content.includes('rembrandt') ||
-    content.includes('da vinci') ||
-    content.includes('sargent') ||
-    content.includes('museum')
-  ) {
+  if (content.includes('oil') || content.includes('painting') || content.includes('canvas') || content.includes('acrylic') || content.includes('gouache') || content.includes('watercolor') || content.includes('watercolour') || content.includes('tempera') || content.includes('impressionism') || content.includes('claudemonet') || content.includes('monet') || content.includes('van gogh') || content.includes('rembrandt') || content.includes('da vinci') || content.includes('sargent') || content.includes('museum')) {
     return 'Oil & Traditional Painting';
   }
 
-  // Natural Scenery
-  if (
-    content.includes('scenery') ||
-    content.includes('landscape') ||
-    content.includes('nature') ||
-    content.includes('mountain') ||
-    content.includes('river') ||
-    content.includes('sea') ||
-    content.includes('ocean') ||
-    content.includes('lake') ||
-    content.includes('forest') ||
-    content.includes('woods') ||
-    content.includes('sunset') ||
-    content.includes('sunrise') ||
-    content.includes('clouds') ||
-    content.includes('field') ||
-    content.includes('beach') ||
-    content.includes('snow') ||
-    content.includes('stream') ||
-    content.includes('valley') ||
-    content.includes('pastoral') ||
-    content.includes('hills')
-  ) {
+  if (content.includes('scenery') || content.includes('landscape') || content.includes('nature') || content.includes('mountain') || content.includes('river') || content.includes('sea') || content.includes('ocean') || content.includes('lake') || content.includes('forest') || content.includes('woods') || content.includes('sunset') || content.includes('sunrise') || content.includes('clouds') || content.includes('field') || content.includes('beach') || content.includes('snow') || content.includes('stream') || content.includes('valley') || content.includes('pastoral') || content.includes('hills')) {
     return 'Natural Scenery';
   }
 
-  // Concept Art / Environmental Studies
-  if (
-    content.includes('concept') ||
-    content.includes('concept art') ||
-    content.includes('study') ||
-    content.includes('studies') ||
-    content.includes('environment study') ||
-    content.includes('bg study') ||
-    content.includes('background study') ||
-    content.includes('composition') ||
-    content.includes('illustration')
-  ) {
+  if (content.includes('concept') || content.includes('concept art') || content.includes('study') || content.includes('studies') || content.includes('environment study') || content.includes('bg study') || content.includes('background study') || content.includes('composition') || content.includes('illustration')) {
     return 'Concept Art & Studies';
   }
 
-  // Digital Art
-  if (
-    content.includes('digital') ||
-    content.includes('procreate') ||
-    content.includes('photoshop') ||
-    content.includes('blender') ||
-    content.includes('render') ||
-    content.includes('c4d') ||
-    content.includes('3d') ||
-    content.includes('digital painting') ||
-    content.includes('digitaloil') ||
-    content.includes('speedpaint') ||
-    content.includes('ciele') ||
-    content.includes('anime') ||
-    content.includes('manga') ||
-    content.includes('fanart')
-  ) {
+  if (content.includes('digital') || content.includes('procreate') || content.includes('photoshop') || content.includes('blender') || content.includes('render') || content.includes('c4d') || content.includes('3d') || content.includes('digital painting') || content.includes('digitaloil') || content.includes('speedpaint') || content.includes('ciele') || content.includes('anime') || content.includes('manga') || content.includes('fanart')) {
     return 'Digital Art';
   }
 
   return 'Other';
 }
 
-// Function to fetch image size (streaming headers if possible)
+const dimensionsCache = new Map<string, { width: number; height: number }>();
+
 async function fetchImageSize(url: string): Promise<{ width: number; height: number } | null> {
-  // Check cache first
   if (dimensionsCache.has(url)) {
     return dimensionsCache.get(url)!;
   }
@@ -306,10 +197,8 @@ async function fetchImageSize(url: string): Promise<{ width: number; height: num
       throw new Error(`Failed to fetch image: HTTP ${response.status}`);
     }
 
-    // Read the stream chunk by chunk until image-size can parse it
     const reader = response.body?.getReader();
     if (!reader) {
-      // Fallback to full buffer if reader is not available
       const arrayBuffer = await response.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       const dimensions = sizeOf(buffer);
@@ -328,7 +217,6 @@ async function fetchImageSize(url: string): Promise<{ width: number; height: num
         chunks.push(value);
         totalLength += value.length;
         
-        // Combine chunks
         const combined = new Uint8Array(totalLength);
         let offset = 0;
         for (const chunk of chunks) {
@@ -340,12 +228,10 @@ async function fetchImageSize(url: string): Promise<{ width: number; height: num
           const buffer = Buffer.from(combined.buffer);
           const dimensions = sizeOf(buffer);
           if (dimensions.width && dimensions.height) {
-            // Found it! Abort the rest of the stream
             controller.abort();
             return { width: dimensions.width, height: dimensions.height };
           }
         } catch (err) {
-          // If it needs more bytes, continue reading
         }
       }
 
@@ -356,7 +242,6 @@ async function fetchImageSize(url: string): Promise<{ width: number; height: num
 
     return null;
   } catch (err) {
-    // Console error only for non-abort failures
     if (err instanceof Error && err.name !== 'AbortError') {
       console.warn(`Error resolving dimensions for ${url}:`, err.message);
     }
@@ -364,7 +249,6 @@ async function fetchImageSize(url: string): Promise<{ width: number; height: num
   }
 }
 
-// Concurrent worker queue to fetch dimensions in parallel
 async function processMediaListInParallel(
   urls: string[],
   concurrencyLimit = 25
@@ -387,12 +271,11 @@ async function processMediaListInParallel(
         const url = urls[index++];
         activeCount++;
 
-        // Process this url
         (async (currentUrl) => {
           const dims = await fetchImageSize(currentUrl);
           if (dims) {
             results.set(currentUrl, dims);
-            dimensionsCache.set(currentUrl, dims); // save in memory cache
+            dimensionsCache.set(currentUrl, dims);
           }
           activeCount--;
           runNext();
@@ -404,17 +287,39 @@ async function processMediaListInParallel(
   });
 }
 
-// Main execution function
 async function main() {
-  console.log('Starting Twitter liked artworks compilation...');
+  console.log('Starting Twitter liked artworks compilation to MongoDB...');
 
   if (!fs.existsSync(RAW_DIR)) {
-    if (fs.existsSync(OUTPUT_FILE)) {
-      console.log('likes-raw/ not found but likes.json already exists — skipping compilation.');
-      return;
-    }
-    console.error(`Error: likes-raw directory does not exist at ${RAW_DIR} and no existing likes.json found.`);
+    console.error(`Error: likes-raw directory does not exist at ${RAW_DIR}`);
     process.exit(1);
+  }
+
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    console.error("MONGODB_URI is not set in .env");
+    process.exit(1);
+  }
+
+  const client = new MongoClient(uri);
+  await client.connect();
+  const db = client.db('sereine');
+  const likesCol = db.collection('likes');
+  const blocksCol = db.collection('blocks');
+
+  // Load old cache to preserve dimensions across runs
+  try {
+    const existingLikes = await likesCol.find({}).project({ media: 1 }).toArray();
+    for (const item of existingLikes) {
+      for (const m of item.media || []) {
+        if (m.url && m.width && m.height) {
+          dimensionsCache.set(m.url, { width: m.width, height: m.height });
+        }
+      }
+    }
+    console.log(`Loaded ${dimensionsCache.size} image dimensions from MongoDB cache.`);
+  } catch (err) {
+    console.warn('Could not load existing cache from MongoDB:', err);
   }
 
   // Load blacklist
@@ -427,14 +332,23 @@ async function main() {
       for (const id of blacklistIds) {
         blacklist.add(id);
       }
-      console.log(`Loaded ${blacklist.size} blacklisted tweets from blacklist.json.`);
-    } catch (err) {
-      console.warn('Could not load blacklist.json:', err);
+      console.log(`Loaded ${blacklist.size} blacklisted items from local blacklist.json.`);
+    } catch (err) {}
+  }
+
+  // Fetch blocklist from MongoDB and merge
+  try {
+    const dbBlocks = await blocksCol.find({}).toArray();
+    for (const b of dbBlocks) {
+      if (b.value) blacklist.add(b.value);
     }
+    console.log(`Loaded ${dbBlocks.length} blacklisted items from MongoDB.`);
+  } catch(err) {
+    console.warn("Could not load blocklist from MongoDB:", err);
   }
 
   // Read all json files
-  const files = fs.readdirSync(RAW_DIR).filter(f => f.endsWith('.json'));
+  const files = fs.readdirSync(RAW_DIR).filter(f => f.endsWith('.json') && f !== 'blacklist.json');
   console.log(`Found ${files.length} raw JSON files to merge.`);
 
   const tweetsMap = new Map<string, RawTweet>();
@@ -447,7 +361,7 @@ async function main() {
       
       for (const tweet of rawTweets) {
         if (!tweet.tweetId) continue;
-        if (blacklist.has(tweet.tweetId)) continue; // Skip blacklisted (removed) items
+        if (blacklist.has(tweet.tweetId)) continue;
         tweetsMap.set(tweet.tweetId, tweet);
       }
     } catch (err) {
@@ -458,7 +372,6 @@ async function main() {
   const rawList = [...tweetsMap.values()];
   console.log(`Deduplicated into ${rawList.length} total unique tweets.`);
 
-  // Get all unique image URLs to fetch their dimensions
   const uniqueUrls = new Set<string>();
   for (const tweet of rawList) {
     if (tweet.media) {
@@ -474,10 +387,8 @@ async function main() {
   const uncachedUrls = urlList.filter(url => !dimensionsCache.has(url));
   console.log(`Total unique images: ${urlList.length} (${uncachedUrls.length} need size lookup).`);
 
-  // Fetch dimensions for all images (using concurrency)
-  const sizes = await processMediaListInParallel(uncachedUrls, 30);
+  await processMediaListInParallel(uncachedUrls, 30);
 
-  // Compile final array
   const compiledData: CompiledTweet[] = [];
 
   for (const tweet of rawList) {
@@ -503,7 +414,6 @@ async function main() {
     const attr = parseAttribution(text);
     const finalAuthorName = formatAttributionDisplay(attr, tweet.authorName || `@${tweet.authorHandle}`);
 
-    // Add main tweet if it has media left
     if (compiledMedia.length > 0) {
       compiledData.push({
         id: tweet.tweetId,
@@ -518,12 +428,11 @@ async function main() {
       });
     }
 
-    // Process quoted tweet as a separate entry
     if (tweet.quotedTweet && tweet.quotedTweet.images && tweet.quotedTweet.images.length > 0) {
       const qt = tweet.quotedTweet;
       if (!blacklist.has(qt.tweetId)) {
         const qText = qt.tweetText || '';
-        const qCategory = classifyTweet(qText, tweet.hashtags || []); // use parent hashtags for categorization context
+        const qCategory = classifyTweet(qText, tweet.hashtags || []);
         const qAttr = parseAttribution(qText);
         const qFinalAuthorName = formatAttributionDisplay(qAttr, qt.authorName || `@${qt.authorHandle}`);
         
@@ -536,7 +445,6 @@ async function main() {
         }).filter(m => !!m.url && !blacklist.has(`img:${m.url}`));
 
         if (qCompiledMedia.length > 0) {
-          // Check if we already have this quote (some quoted tweets might be repeated)
           if (!compiledData.find(c => c.id === qt.tweetId)) {
             compiledData.push({
               id: qt.tweetId,
@@ -556,24 +464,26 @@ async function main() {
     }
   }
 
-  // Deduplicate by ID (a tweet could be added as a quoted tweet and also as a main tweet)
   const uniqueCompiled = new Map<string, CompiledTweet>();
   for (const c of compiledData) {
-    // Prefer the main tweet over the quoted tweet representation if duplicates exist 
-    // (main tweet usually has better categorization data)
     if (!uniqueCompiled.has(c.id) || c.hashtags.length > 0) {
       uniqueCompiled.set(c.id, c);
     }
   }
 
   const finalData = Array.from(uniqueCompiled.values());
-
-  // Sort by collectedAt (newest first)
   finalData.sort((a, b) => new Date(b.collectedAt).getTime() - new Date(a.collectedAt).getTime());
 
-  // Write output file
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(finalData, null, 2), 'utf-8');
-  console.log(`Compilation complete! Wrote ${finalData.length} entries to ${OUTPUT_FILE}`);
+  console.log(`Clearing existing likes collection...`);
+  await likesCol.deleteMany({});
+  
+  if (finalData.length > 0) {
+    console.log(`Inserting ${finalData.length} tweets into MongoDB...`);
+    await likesCol.insertMany(finalData);
+  }
+
+  console.log(`Compilation complete! Wrote ${finalData.length} entries to MongoDB sereine.likes`);
+  await client.close();
 }
 
 main();

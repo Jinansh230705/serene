@@ -1,5 +1,5 @@
 import { NextResponse, NextRequest } from 'next/server';
-import likesData from '@/data/likes.json';
+import { getDb } from '@/lib/mongodb';
 
 interface CompiledMedia {
   url: string;
@@ -42,11 +42,36 @@ export async function GET(request: NextRequest) {
     const widthParam = searchParams.get('width');
     const heightParam = searchParams.get('height');
 
-    const tweets = likesData as Tweet[];
+    let tweets: Tweet[] = [];
+    try {
+      const db = await getDb();
+      const likesCol = db.collection('likes');
+      
+      const query: any = {};
+      if (category && category !== 'All') {
+        query.category = { $regex: new RegExp(`^${category}$`, 'i') };
+      }
+
+      if (search) {
+        const searchRegex = { $regex: search, $options: 'i' };
+        query.$or = [
+          { authorName: searchRegex },
+          { authorHandle: searchRegex },
+          { text: searchRegex },
+          { hashtags: searchRegex }
+        ];
+      }
+
+      tweets = (await likesCol.find(query).toArray()) as unknown as Tweet[];
+    } catch (e) {
+      console.error('Error reading from MongoDB:', e);
+    }
+
     let wallpapers: Wallpaper[] = [];
 
     // Flatten tweets with multiple images into separate wallpaper items
     for (const t of tweets) {
+      if (!t.media) continue;
       t.media.forEach((m, idx) => {
         if (!m.url) return;
         
@@ -68,22 +93,6 @@ export async function GET(request: NextRequest) {
           collectedAt: t.collectedAt
         });
       });
-    }
-
-    // Apply category filter
-    if (category && category !== 'All') {
-      const catLower = category.toLowerCase();
-      wallpapers = wallpapers.filter(w => w.category.toLowerCase() === catLower);
-    }
-
-    // Apply search filter
-    if (search) {
-      const query = search.toLowerCase().trim();
-      wallpapers = wallpapers.filter(w => 
-        w.artistName.toLowerCase().includes(query) ||
-        w.artistHandle.toLowerCase().includes(query) ||
-        w.attribution.toLowerCase().includes(query)
-      );
     }
 
     // Apply screensize orientation filtering

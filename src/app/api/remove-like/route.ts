@@ -1,10 +1,9 @@
 import { NextResponse, NextRequest } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { getDb } from '@/lib/mongodb';
 
 // Output paths
-const DATA_DIR = path.join(process.cwd(), 'src', 'data');
-const LIKES_FILE = path.join(DATA_DIR, 'likes.json');
 const RAW_DIR = path.join(process.cwd(), 'likes-raw');
 const BLACKLIST_FILE = path.join(RAW_DIR, 'blacklist.json');
 
@@ -30,38 +29,36 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Dev Admin] Requested removal of tweet: ${id} ${imageUrl ? `image: ${imageUrl}` : ''}`);
 
-    // 2. Load and update likes.json
-    if (!fs.existsSync(LIKES_FILE)) {
-      return NextResponse.json(
-        { error: 'likes.json database file not found.' },
-        { status: 404 }
-      );
-    }
+    const db = await getDb();
+    const likesCol = db.collection('likes');
+    const blocksCol = db.collection('blocks');
 
-    const likesContent = fs.readFileSync(LIKES_FILE, 'utf-8');
-    const likesData = JSON.parse(likesContent);
-    
-    let updatedLikes = likesData;
+    // 2. Update MongoDB likes collection
     if (imageUrl) {
-      // Remove specific image
-      updatedLikes = likesData.map((item: any) => {
-        if (item.id === id && item.media) {
-          return {
-            ...item,
-            media: item.media.filter((m: any) => m.url !== imageUrl)
-          };
+      // Find document and pull image
+      const doc = await likesCol.findOne({ id });
+      if (doc && doc.media) {
+        const updatedMedia = doc.media.filter((m: any) => m.url !== imageUrl);
+        if (updatedMedia.length === 0) {
+          await likesCol.deleteOne({ id });
+        } else {
+          await likesCol.updateOne({ id }, { $set: { media: updatedMedia } });
         }
-        return item;
-      }).filter((item: any) => item.media && item.media.length > 0);
+      }
     } else {
-      // Filter out the entire deleted item
-      updatedLikes = likesData.filter((item: any) => item.id !== id);
+      // Remove the entire tweet document
+      await likesCol.deleteOne({ id });
     }
 
-    // Save updated likes.json back to disk
-    fs.writeFileSync(LIKES_FILE, JSON.stringify(updatedLikes, null, 2), 'utf-8');
+    // 3. Update MongoDB blocks collection
+    const blacklistItem = imageUrl ? `img:${imageUrl}` : id;
+    await blocksCol.updateOne(
+      { value: blacklistItem },
+      { $set: { value: blacklistItem, addedAt: new Date().toISOString() } },
+      { upsert: true }
+    );
 
-    // 3. Load, update, and write blacklist.json
+    // 4. Load, update, and write local blacklist.json to prevent recompiling
     let blacklist: string[] = [];
     if (fs.existsSync(BLACKLIST_FILE)) {
       try {
@@ -73,7 +70,6 @@ export async function POST(request: NextRequest) {
     }
 
     // Add to blacklist if not already there
-    const blacklistItem = imageUrl ? `img:${imageUrl}` : id;
     if (!blacklist.includes(blacklistItem)) {
       blacklist.push(blacklistItem);
       // Ensure likes-raw directory exists
