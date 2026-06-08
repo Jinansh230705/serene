@@ -26,7 +26,7 @@ interface GalleryCardProps {
   onClick: () => void;
   mediaIndex?: number;
   isDevMode?: boolean;
-  onRemove?: (e: React.MouseEvent) => void;
+  onRemove?: (e: React.MouseEvent, id: string, imageUrl: string) => void;
 }
 
 export default function GalleryCard({ tweet, onClick, mediaIndex = 0, isDevMode, onRemove }: GalleryCardProps) {
@@ -63,7 +63,9 @@ export default function GalleryCard({ tweet, onClick, mediaIndex = 0, isDevMode,
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onRemove(e);
+            if (activeMedia?.url) {
+              onRemove(e, tweet.id, activeMedia.url);
+            }
           }}
           className="absolute top-1.5 left-1.5 bg-[#FAF8F5]/95 hover:bg-red-50 hover:text-red-600 hover:border-red-200 border border-[#EAE4D9] p-1.5 rounded-full z-30 shadow-sm transition-all duration-300 cursor-pointer"
           title="Remove from gallery"

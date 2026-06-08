@@ -27,7 +27,7 @@ interface LightboxProps {
   onNext?: () => void;
   onPrev?: () => void;
   isDevMode?: boolean;
-  onRemove?: (id: string) => void;
+  onRemove?: (id: string, imageUrl?: string) => void;
   initialMediaIndex?: number;
 }
 
@@ -35,6 +35,14 @@ export default function Lightbox({ tweet, onClose, onNext, onPrev, isDevMode, on
   const [currentImgIndex, setCurrentImgIndex] = useState(initialMediaIndex);
   const [loaded, setLoaded] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
+  
+  // Reporting state
+  const [showReportForm, setShowReportForm] = useState(false);
+  const [reportReason, setReportReason] = useState('Not an Art');
+  const [reportDetails, setReportDetails] = useState('');
+  const [isReporting, setIsReporting] = useState(false);
+  const [reportSuccess, setReportSuccess] = useState(false);
+
   const imgRef = useRef<HTMLImageElement>(null);
 
   // Reset states when tweet or initial index changes
@@ -50,20 +58,21 @@ export default function Lightbox({ tweet, onClose, onNext, onPrev, isDevMode, on
     }
   }, [currentImgIndex, tweet]);
 
-  const handleRemove = async () => {
+  const handleRemove = async (imageUrl?: string) => {
     setIsRemoving(true);
     try {
+      const bodyPayload = imageUrl ? { id: tweet.id, imageUrl } : { id: tweet.id };
       const response = await fetch('/api/remove-like', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ id: tweet.id }),
+        body: JSON.stringify(bodyPayload),
       });
 
       if (response.ok) {
         if (onRemove) {
-          onRemove(tweet.id);
+          onRemove(tweet.id, imageUrl);
         }
       } else {
         const data = await response.json();
@@ -74,6 +83,71 @@ export default function Lightbox({ tweet, onClose, onNext, onPrev, isDevMode, on
       alert('Failed to send remove request.');
     } finally {
       setIsRemoving(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!activeMedia?.url) return;
+    try {
+      const response = await fetch(activeMedia.url);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const filename = activeMedia.url.split('/').pop()?.split('?')[0] || 'download.jpg';
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } catch (e) {
+      console.error('Failed to download image', e);
+      window.open(activeMedia.url, '_blank');
+    }
+  };
+
+  const handleReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsReporting(true);
+    try {
+      const response = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tweetId: tweet.id,
+          imageUrl: activeMedia?.url,
+          reason: reportReason,
+          details: reportReason === 'Other' ? reportDetails : ''
+        })
+      });
+      if (response.ok) {
+        setReportSuccess(true);
+        setTimeout(() => {
+          setShowReportForm(false);
+          setReportSuccess(false);
+          setReportReason('Not an Art');
+          setReportDetails('');
+        }, 2000);
+      } else {
+        alert('Failed to submit report. Please try again.');
+      }
+    } catch (err) {
+      alert('Error submitting report.');
+    } finally {
+      setIsReporting(false);
+    }
+  };
+
+  const [showShareToast, setShowShareToast] = useState(false);
+
+  const handleShare = async () => {
+    try {
+      const shareUrl = `${window.location.origin}${window.location.pathname}?image=${tweet.id}-${currentImgIndex}`;
+      await navigator.clipboard.writeText(shareUrl);
+      setShowShareToast(true);
+      setTimeout(() => setShowShareToast(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy', err);
     }
   };
 
@@ -144,16 +218,18 @@ export default function Lightbox({ tweet, onClose, onNext, onPrev, isDevMode, on
       {/* Main Container (Skeuomorphic Device Frame) */}
       <div className="relative w-full max-w-6xl skeuo-lightbox-frame z-10 flex h-[90vh] md:h-[80vh] overflow-hidden">
           
-          {/* Close Button on the Bezel */}
-          <button 
-            onClick={onClose}
-            className="absolute top-2 right-2 md:top-4 md:right-4 z-30 p-1.5 md:p-2 rounded-full bg-[#FAF8F5]/90 border border-[#EAE4D9] text-[#8E8477] hover:text-[#2E2B29] transition-colors shadow-sm cursor-pointer"
-            aria-label="Close lightbox"
-          >
-            <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          {/* Action Buttons on the Bezel */}
+          <div className="absolute top-2 right-2 md:top-4 md:right-4 z-30 flex items-center gap-2">
+            <button 
+              onClick={onClose}
+              className="p-1.5 md:p-2 rounded-full bg-[#FAF8F5]/90 border border-[#EAE4D9] text-[#8E8477] hover:text-[#2E2B29] transition-colors shadow-sm cursor-pointer"
+              aria-label="Close lightbox"
+            >
+              <svg className="w-4 h-4 md:w-5 md:h-5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
 
           {/* Recessed Screen Area */}
           <div className="skeuo-screen flex flex-col md:flex-row w-full h-full overflow-hidden relative">
@@ -241,22 +317,52 @@ export default function Lightbox({ tweet, onClose, onNext, onPrev, isDevMode, on
                 {tweet.category}
               </span>
 
-              {/* Artist Attribution */}
-              <div className="mb-6">
-                <h2 className="text-lg font-bold text-[#2E2B29] tracking-tight leading-snug">
-                  {tweet.authorName}
-                </h2>
-                <a 
-                  href={`https://x.com/${tweet.authorHandle}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-[#8E8477] hover:text-[#2E2B29] hover:underline inline-flex items-center gap-1 mt-1 font-medium transition-colors"
-                >
-                  @{tweet.authorHandle}
-                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                  </svg>
-                </a>
+              {/* Artist Attribution & Actions */}
+              <div className="mb-6 flex justify-between items-start">
+                <div>
+                  <h2 className="text-lg font-bold text-[#2E2B29] tracking-tight leading-snug">
+                    {tweet.authorName}
+                  </h2>
+                  <a 
+                    href={`https://x.com/${tweet.authorHandle}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-[#8E8477] hover:text-[#2E2B29] hover:underline inline-flex items-center gap-1 mt-1 font-medium transition-colors"
+                  >
+                    @{tweet.authorHandle}
+                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                    </svg>
+                  </a>
+                </div>
+                
+                <div className="flex items-center gap-1.5 relative">
+                  {showShareToast && (
+                    <span className="absolute -top-8 right-0 text-[10px] text-green-700 bg-green-50 px-2 py-1 rounded-full shadow-sm whitespace-nowrap">
+                      Copied link!
+                    </span>
+                  )}
+                  <button 
+                    onClick={handleShare}
+                    className="p-1.5 rounded-full bg-white border border-[#EAE4D9] text-[#8E8477] hover:text-[#2E2B29] hover:scale-105 transition-all shadow-sm cursor-pointer"
+                    title="Share image link"
+                    aria-label="Share image link"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                    </svg>
+                  </button>
+                  <button 
+                    onClick={handleDownload}
+                    className="p-1.5 rounded-full bg-white border border-[#EAE4D9] text-[#8E8477] hover:text-[#2E2B29] hover:scale-105 transition-all shadow-sm cursor-pointer"
+                    title="Download image"
+                    aria-label="Download image"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               {/* Collection Thumbnails ("From the same collection") */}
@@ -337,18 +443,100 @@ export default function Lightbox({ tweet, onClose, onNext, onPrev, isDevMode, on
               </div>
             </div>
 
-            {/* Development mode delete control */}
-            {isDevMode && onRemove && (
-              <div className="border-t border-[#EAE4D9]/50 pt-4 mt-4">
+            {/* Action Section (Report & Dev Controls) */}
+            <div className="border-t border-[#EAE4D9]/50 pt-4 mt-4 flex flex-col gap-3">
+              {/* Report Control */}
+              <div className="relative w-full">
                 <button
-                  disabled={isRemoving}
-                  onClick={handleRemove}
-                  className="w-full text-center py-2 px-3 border rounded text-[10px] tracking-widest uppercase font-semibold transition-all duration-300 cursor-pointer bg-[#FBF9F6] text-[#8E8477] border-[#EAE4D9] hover:border-red-300 hover:text-red-500 hover:bg-red-50/20"
+                  onClick={() => setShowReportForm(!showReportForm)}
+                  className={`w-full flex items-center justify-center gap-2 py-2 px-3 border rounded text-[10px] tracking-widest uppercase font-semibold transition-all duration-300 cursor-pointer ${showReportForm ? 'bg-[#2E2B29] text-[#FAF8F5] border-[#2E2B29]' : 'bg-[#FBF9F6] text-[#8E8477] border-[#EAE4D9] hover:border-[#2E2B29] hover:text-[#2E2B29]'}`}
                 >
-                  {isRemoving ? 'Removing...' : 'Remove from Gallery'}
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  Report Issue
                 </button>
+
+                {/* Report Dropdown Form */}
+                {showReportForm && (
+                  <div className="absolute bottom-full left-0 mb-2 bg-[#FAF8F5] border border-[#EAE4D9] shadow-lg rounded-xl p-4 w-full text-left animate-in fade-in zoom-in-95 z-50">
+                    {reportSuccess ? (
+                      <div className="text-green-600 flex flex-col items-center py-2 text-sm">
+                        <svg className="w-8 h-8 mb-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Report Submitted
+                      </div>
+                    ) : (
+                      <form onSubmit={handleReport} className="flex flex-col gap-3">
+                        <h4 className="font-semibold text-[#2E2B29] text-sm">Report Image</h4>
+                        <div className="flex flex-col gap-2">
+                          {['Not an Art', 'Not upto quality', 'Copyright', 'Other'].map(reason => (
+                            <label key={reason} className="flex items-center gap-2 text-sm text-[#4A453F] cursor-pointer">
+                              <input 
+                                type="radio" 
+                                name="reportReason" 
+                                value={reason}
+                                checked={reportReason === reason}
+                                onChange={(e) => setReportReason(e.target.value)}
+                                className="text-[#2E2B29] focus:ring-[#2E2B29]"
+                              />
+                              {reason}
+                            </label>
+                          ))}
+                        </div>
+                        {reportReason === 'Other' && (
+                          <input 
+                            type="text" 
+                            placeholder="Please specify..." 
+                            value={reportDetails}
+                            onChange={(e) => setReportDetails(e.target.value)}
+                            className="w-full mt-1 p-2 text-sm border border-[#EAE4D9] rounded bg-white text-[#2E2B29] focus:outline-none focus:border-[#8E8477]"
+                            required
+                          />
+                        )}
+                        <div className="mt-2 flex justify-end gap-2">
+                          <button 
+                            type="button" 
+                            onClick={() => setShowReportForm(false)}
+                            className="px-3 py-1.5 text-xs text-[#8E8477] hover:text-[#2E2B29] transition-colors"
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            type="submit" 
+                            disabled={isReporting}
+                            className="px-3 py-1.5 text-xs bg-[#2E2B29] text-white rounded hover:bg-black disabled:opacity-50 transition-colors"
+                          >
+                            {isReporting ? 'Sending...' : 'Submit'}
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
+
+              {/* Development mode delete control */}
+              {isDevMode && onRemove && (
+                <div className="flex flex-col gap-2 pt-1">
+                  <button
+                    disabled={isRemoving}
+                    onClick={() => handleRemove(activeMedia?.url)}
+                    className="w-full text-center py-2 px-3 border rounded text-[10px] tracking-widest uppercase font-semibold transition-all duration-300 cursor-pointer bg-[#FBF9F6] text-[#8E8477] border-[#EAE4D9] hover:border-orange-300 hover:text-orange-500 hover:bg-orange-50/20"
+                  >
+                    {isRemoving ? 'Removing...' : 'Remove This Image'}
+                  </button>
+                  <button
+                    disabled={isRemoving}
+                    onClick={() => handleRemove()}
+                    className="w-full text-center py-2 px-3 border rounded text-[10px] tracking-widest uppercase font-semibold transition-all duration-300 cursor-pointer bg-[#FBF9F6] text-[#8E8477] border-[#EAE4D9] hover:border-red-300 hover:text-red-500 hover:bg-red-50/20"
+                  >
+                    {isRemoving ? 'Removing...' : 'Remove Entire Post'}
+                  </button>
+                </div>
+              )}
+            </div>
 
           </div>
 

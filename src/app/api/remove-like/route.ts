@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json();
-    const { id } = body;
+    const { id, imageUrl } = body;
 
     if (!id) {
       return NextResponse.json(
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`[Dev Admin] Requested removal of tweet: ${id}`);
+    console.log(`[Dev Admin] Requested removal of tweet: ${id} ${imageUrl ? `image: ${imageUrl}` : ''}`);
 
     // 2. Load and update likes.json
     if (!fs.existsSync(LIKES_FILE)) {
@@ -41,8 +41,22 @@ export async function POST(request: NextRequest) {
     const likesContent = fs.readFileSync(LIKES_FILE, 'utf-8');
     const likesData = JSON.parse(likesContent);
     
-    // Filter out the deleted item
-    const updatedLikes = likesData.filter((item: any) => item.id !== id);
+    let updatedLikes = likesData;
+    if (imageUrl) {
+      // Remove specific image
+      updatedLikes = likesData.map((item: any) => {
+        if (item.id === id && item.media) {
+          return {
+            ...item,
+            media: item.media.filter((m: any) => m.url !== imageUrl)
+          };
+        }
+        return item;
+      }).filter((item: any) => item.media && item.media.length > 0);
+    } else {
+      // Filter out the entire deleted item
+      updatedLikes = likesData.filter((item: any) => item.id !== id);
+    }
 
     // Save updated likes.json back to disk
     fs.writeFileSync(LIKES_FILE, JSON.stringify(updatedLikes, null, 2), 'utf-8');
@@ -59,8 +73,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Add to blacklist if not already there
-    if (!blacklist.includes(id)) {
-      blacklist.push(id);
+    const blacklistItem = imageUrl ? `img:${imageUrl}` : id;
+    if (!blacklist.includes(blacklistItem)) {
+      blacklist.push(blacklistItem);
       // Ensure likes-raw directory exists
       if (!fs.existsSync(RAW_DIR)) {
         fs.mkdirSync(RAW_DIR, { recursive: true });

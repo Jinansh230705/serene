@@ -71,13 +71,21 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || '';
     const seed = searchParams.get('seed') || '';
 
-    // Load likes.json dynamically from disk to bypass ESM caching and match updates
-    const filePath = path.join(process.cwd(), 'src', 'data', 'likes.json');
+    // Due to Turbopack workspace inference issues, process.cwd() might point to the user root.
+    // We provide a fallback path just in case.
+    const possiblePaths = [
+      path.join(process.cwd(), 'src', 'data', 'likes.json'),
+      path.join(process.cwd(), 'Downloads', 'tweeter-likes', 'src', 'data', 'likes.json')
+    ];
+
     let tweets: Tweet[] = [];
     try {
-      if (fs.existsSync(filePath)) {
-        const fileContent = fs.readFileSync(filePath, 'utf-8');
-        tweets = JSON.parse(fileContent);
+      for (const filePath of possiblePaths) {
+        if (fs.existsSync(filePath)) {
+          const fileContent = fs.readFileSync(filePath, 'utf-8');
+          tweets = JSON.parse(fileContent);
+          break;
+        }
       }
     } catch (e) {
       console.error('Error reading likes.json dynamically:', e);

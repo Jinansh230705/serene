@@ -14,6 +14,7 @@ interface RawMedia {
 
 interface RawQuotedTweet {
   tweetId: string;
+  authorName?: string;
   authorHandle: string;
   tweetUrl: string;
   tweetText: string;
@@ -72,6 +73,108 @@ if (fs.existsSync(OUTPUT_FILE)) {
   } catch (err) {
     console.warn('Could not load existing cache:', err);
   }
+}
+
+interface Attribution {
+  title: string | null;
+  artist: string | null;
+  year: string | null;
+}
+
+// Function to extract structured attribution details from text
+function parseAttribution(text: string): Attribution {
+  const t = text.split('\n')[0].trim();
+  
+  let year: string | null = null;
+  let yearMatch = t.match(/\b(1[4-9]\d{2}|20[0-2]\d)\b/);
+  if (yearMatch) {
+    year = yearMatch[1];
+  }
+
+  // Remove parentheses blocks and years to isolate the title and artist
+  let clean = t.replace(/\([^)]*\)/g, '').trim();
+  clean = clean.replace(/,?\s*(?:ca\.\s*)?\b(1[4-9]\d{2}|20[0-2]\d)\b/ig, '').replace(/\.$/, '').trim();
+
+  // Helper to validate if a string looks like a name
+  const isValidName = (str: string) => {
+    const words = str.split(/\s+/);
+    if (words.length < 2 || words.length > 5) return false;
+    return words.every(w => {
+      if (/^(van|von|de|da|di|le|la|du|del|the)$/i.test(w)) return true;
+      return /^[A-Z\p{Lu}]/u.test(w) || /^['"‘“]/.test(w);
+    });
+  };
+
+  let title: string | null = null;
+  let artist: string | null = null;
+
+  // 1. [Artist]'s [Title]
+  let m = clean.match(/^([A-Z\p{Lu}].*?)'s\s+(.+)$/u);
+  if (m && isValidName(m[1].trim())) {
+    return { title: m[2].trim(), artist: m[1].trim(), year };
+  }
+
+  // 2. [Title] by|of [Artist]
+  m = clean.match(/^(.*)\s+(?:by|of)\s+([A-Z\p{Lu}].*)$/u);
+  if (m && isValidName(m[2].trim())) {
+    title = m[1].trim();
+    artist = m[2].trim();
+    // Neutralize generic descriptor titles like "Paintings" or "The Seascapes"
+    if (/^(works|paintings|art|seascapes|landscapes|masterpieces?|the\s+.*?(?:paintings|works|art|seascapes|landscapes))$/i.test(title)) {
+      title = null;
+    }
+    return { title, artist, year };
+  }
+
+  // 3. [Title] - [Artist]
+  m = clean.match(/^(.*?)\s*[-–—]\s*([A-Z\p{Lu}].*)$/u);
+  if (m && isValidName(m[2].trim())) {
+    title = m[1].trim();
+    artist = m[2].trim();
+    return { title, artist, year };
+  }
+
+  // 4. [Artist] - [Title]
+  if (m && isValidName(m[1].trim())) {
+    artist = m[1].trim();
+    title = m[2].trim();
+    return { title, artist, year };
+  }
+
+  // 5. [Title]. [Artist]
+  m = clean.match(/^(.*?)\s*\.\s*([A-Z\p{Lu}].*)$/u);
+  if (m && isValidName(m[2].trim())) {
+    title = m[1].trim();
+    artist = m[2].trim();
+    return { title, artist, year };
+  }
+
+  // 6. [Title], [Artist]
+  m = clean.match(/^(.*?)\s*,\s*([A-Z\p{Lu}].*)$/u);
+  if (m && isValidName(m[2].trim())) {
+    title = m[1].trim();
+    artist = m[2].trim();
+    return { title, artist, year };
+  }
+
+  // 7. Just Artist
+  if (isValidName(clean)) {
+    artist = clean;
+    return { title, artist, year };
+  }
+
+  return { title: null, artist: null, year };
+}
+
+function formatAttributionDisplay(attr: Attribution, fallbackName: string): string {
+  let display = attr.artist || fallbackName;
+  if (attr.artist && attr.title) {
+    display = `${attr.title} by ${attr.artist}`;
+  }
+  if (attr.artist && attr.year) {
+    display += ` (${attr.year})`;
+  }
+  return display;
 }
 
 // Function to classify tweet based on content
@@ -395,30 +498,82 @@ async function main() {
         }
         return { url };
       })
-      .filter(m => !!m.url);
+      .filter(m => !!m.url && !blacklist.has(`img:${m.url}`));
 
-    // Skip tweets that have no media images
-    if (compiledMedia.length === 0) continue;
+    const attr = parseAttribution(text);
+    const finalAuthorName = formatAttributionDisplay(attr, tweet.authorName || `@${tweet.authorHandle}`);
 
-    compiledData.push({
-      id: tweet.tweetId,
-      authorName: tweet.authorName || `@${tweet.authorHandle}`,
-      authorHandle: tweet.authorHandle,
-      tweetUrl: tweet.tweetUrl,
-      text,
-      hashtags: tweet.hashtags || [],
-      media: compiledMedia,
-      category,
-      collectedAt: tweet.collectedAt || new Date().toISOString()
-    });
+    // Add main tweet if it has media left
+    if (compiledMedia.length > 0) {
+      compiledData.push({
+        id: tweet.tweetId,
+        authorName: finalAuthorName,
+        authorHandle: tweet.authorHandle,
+        tweetUrl: tweet.tweetUrl,
+        text,
+        hashtags: tweet.hashtags || [],
+        media: compiledMedia,
+        category,
+        collectedAt: tweet.collectedAt || new Date().toISOString()
+      });
+    }
+
+    // Process quoted tweet as a separate entry
+    if (tweet.quotedTweet && tweet.quotedTweet.images && tweet.quotedTweet.images.length > 0) {
+      const qt = tweet.quotedTweet;
+      if (!blacklist.has(qt.tweetId)) {
+        const qText = qt.tweetText || '';
+        const qCategory = classifyTweet(qText, tweet.hashtags || []); // use parent hashtags for categorization context
+        const qAttr = parseAttribution(qText);
+        const qFinalAuthorName = formatAttributionDisplay(qAttr, qt.authorName || `@${qt.authorHandle}`);
+        
+        const qCompiledMedia = qt.images.map(url => {
+          const dims = dimensionsCache.get(url);
+          if (dims) {
+            return { url, width: dims.width, height: dims.height, aspectRatio: parseFloat((dims.width / dims.height).toFixed(3)) };
+          }
+          return { url };
+        }).filter(m => !!m.url && !blacklist.has(`img:${m.url}`));
+
+        if (qCompiledMedia.length > 0) {
+          // Check if we already have this quote (some quoted tweets might be repeated)
+          if (!compiledData.find(c => c.id === qt.tweetId)) {
+            compiledData.push({
+              id: qt.tweetId,
+              // @ts-ignore
+              authorName: qFinalAuthorName,
+              authorHandle: qt.authorHandle,
+              tweetUrl: qt.tweetUrl,
+              text: qText,
+              hashtags: [],
+              media: qCompiledMedia,
+              category: qCategory,
+              collectedAt: tweet.collectedAt || new Date().toISOString()
+            });
+          }
+        }
+      }
+    }
   }
 
+  // Deduplicate by ID (a tweet could be added as a quoted tweet and also as a main tweet)
+  const uniqueCompiled = new Map<string, CompiledTweet>();
+  for (const c of compiledData) {
+    // Prefer the main tweet over the quoted tweet representation if duplicates exist 
+    // (main tweet usually has better categorization data)
+    if (!uniqueCompiled.has(c.id) || c.hashtags.length > 0) {
+      uniqueCompiled.set(c.id, c);
+    }
+  }
+
+  const finalData = Array.from(uniqueCompiled.values());
+
   // Sort by collectedAt (newest first)
-  compiledData.sort((a, b) => new Date(b.collectedAt).getTime() - new Date(a.collectedAt).getTime());
+  finalData.sort((a, b) => new Date(b.collectedAt).getTime() - new Date(a.collectedAt).getTime());
 
   // Write output file
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(compiledData, null, 2), 'utf-8');
-  console.log(`Compilation complete! Wrote ${compiledData.length} entries to ${OUTPUT_FILE}`);
+  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(finalData, null, 2), 'utf-8');
+  console.log(`Compilation complete! Wrote ${finalData.length} entries to ${OUTPUT_FILE}`);
 }
 
 main();
