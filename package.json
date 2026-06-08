@@ -7,8 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "compile": "bun run scripts/compile-data.ts",
-    "prebuild": "bun run scripts/compile-data.ts"
+    "compile": "bun run scripts/compile-data.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
